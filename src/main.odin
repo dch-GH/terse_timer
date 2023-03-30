@@ -6,12 +6,7 @@ import     "core:strconv"
 import     "core:time"
 import str "core:strings"
 
-TERSE_FORMATS :: "dhms"
-
-Timer :: struct {
-    seconds: f64,
-    format: rune,
-}
+TERSE_FORMATS :: "hms"
 
 main :: proc() {
     args := os.args[1:]
@@ -20,92 +15,80 @@ main :: proc() {
     if arg_c <= 0 {
         fmt.eprintln("ERROR! : Expected a duration!")
             fmt.println("Examples:")
-            fmt.println("\"timer.exe 10s\"  == 10 seconds")
-            fmt.println("\"timer.exe 30m\"  == 30 minutes")
-            fmt.println("\"timer.exe 1:20\" == 1 minute and 20 seconds")
-            fmt.println("\"timer.exe 2:30h\" == 2 and a half hours")
+            fmt.println("5 == minutes")
+            fmt.println("10s == 10 seconds")
+            fmt.println("30m or 0.5h == 30 minutes")
+            fmt.println("1.5m == 1 minute and 30 seconds")
             fmt.println("Formats: h=hour, m=minute, s=second.")
         return
     }
 
     input_duration := args[0]
-    if str.contains(input_duration, ":") {
-        could_parse := parse_timer_verbose(input_duration)
-        if !could_parse {
-            fmt.eprintln("Could not parse timer duration in minutes!\nInput should look like: 1:30 or 1.5m")
-            return
+    duration_seconds, ok:= create_duration_terse(input_duration)
+    if !ok {
+        fmt.eprintln("Could not parse terse timer duration. Input should look like \"60s\", \"1m\"")
+        return
+    }
+    do_timer(duration_seconds)
+}
+
+create_duration_terse :: proc(user_input : string) -> (time.Duration, bool) {
+    // Default to minutes
+    terse_duration_format: rune = 'm'
+    duration_multiplier: f64 = 0
+
+    if str.contains_any(user_input, TERSE_FORMATS) {
+        // If the user tried more than one (for some reason)
+        // we just take the first one anyway.
+        start := user_input[0]
+        end := str.index_any(user_input, TERSE_FORMATS)
+
+        terse_duration_format = rune(user_input[end])
+        parsed, parse_success := strconv.parse_f64(str.cut(s=user_input, rune_length=end ))
+        if !parse_success {
+            fmt.eprintln("Error parsing timer duration!")
+            return 0, false
         }
+
+        duration_multiplier = parsed
     }
     else {
-        timer_maybe := create_duration_terse(input_duration)
-        timer, ok := timer_maybe.?
-        if !ok {
-            fmt.eprintln("Could not parse terse timer duration. Input should look like \"60s\", \"1m\"")
-            return
-        }
-        do_timer(timer)
-    }
-}
-
-create_duration_terse :: proc(user_input : string) -> Maybe(Timer) {
-    if !str.contains_any(user_input, TERSE_FORMATS) {
-        return nil
+        duration_multiplier, _ = strconv.parse_f64(user_input)
     }
 
-    start := user_input[0]
-    end := str.index_any(user_input, TERSE_FORMATS)
+    total_duration_seconds : time.Duration
 
-    duration_multiplier, parse_success := strconv.parse_f64(str.cut(s=user_input, rune_length=end ))
-    if !parse_success {
-        fmt.eprintln("Error parsing terse timer duration!")
-        return nil
-    }
-
-    // If the user tried more than one (for some reason)
-    // we just take the first one anyway.
-    terse_duration_format := rune(user_input[end])
-    fmt.println(duration_multiplier, terse_duration_format)
-    total_duration_seconds : f64
-    
     switch terse_duration_format {
-        case 'd': 
-            total_duration_seconds = time.duration_seconds(time.Hour * 24) * duration_multiplier
         case 'h':
-            total_duration_seconds = time.duration_seconds(time.Hour) * duration_multiplier
+            total_duration_seconds = time.Duration(time.duration_seconds(time.Hour) * duration_multiplier)
         case 'm':
-            total_duration_seconds = time.duration_seconds(time.Minute) * duration_multiplier
+            total_duration_seconds = time.Duration(time.duration_seconds(time.Minute) * duration_multiplier)
         case 's':
-            total_duration_seconds = time.duration_seconds(time.Second) * duration_multiplier
+            total_duration_seconds = time.Duration(time.duration_seconds(time.Second) * duration_multiplier)
     }
 
-    fmt.printf("created duration : %v\n", total_duration_seconds)
-    t : Timer
-    t.seconds = total_duration_seconds
-    t.format = terse_duration_format
-    return t
+    return total_duration_seconds, true
 }
 
-parse_timer_verbose :: proc(user_input: string) -> bool {
-    if len(user_input) > 4 {
-        return false
-    }
-    return true
-}
+do_timer :: proc (duration: time.Duration) {
+    time_left: u64 = u64(duration)
+    h,m,s := time.clock_from_seconds(time_left)
+    fmt.println()
+    fmt.printf("Setting timer: %vh, %vm, %vs\n", h, m, s)
+    fmt.printf("Timer starting @ current time: %v\n", time.now())
 
-do_timer :: proc (timer: Timer) {
-    using timer
-    fmt.printf("Setting timer for {:v} {:v}\n", seconds, format)
-    time_left := seconds
-    formatted_time : string
     for {
-        fmt.printf("%v %v\n", time_left, format)
-        time.sleep(time.Second)
-        time_left -= 1
-        if time_left < 0 {
+        if time_left <= 0 {
            break 
         }
+        h,m,s = time.clock_from_seconds(time_left)    
+        fmt.printf("%vh %vm %vs left\r", h, m, s )
+        time.sleep(time.Second)
+        time_left -= 1
     }
 
+    fmt.println("=====================================")
     fmt.printf("\a")
-    fmt.println("Time's up!")
+    fmt.printf("Time's up! @ current time: %v\n", time.now())
+    fmt.println()
 }
